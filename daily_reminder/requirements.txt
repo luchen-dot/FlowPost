@@ -1,0 +1,20 @@
+# ── Core AI ──────────────────────────────────────────────────────────────────
+anthropic>=0.40.0
+
+# ── Google APIs ───────────────────────────────────────────────────────────────
+google-api-python-client>=2.120.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
+schedule>=1.2.0
+
+# ── System Tray (optional but recommended) ───────────────────────────────────
+pystray>=0.19.0
+Pillow>=10.0.0
+
+# ── Desktop Notifications (cross-platform fallback) ──────────────────────────
+plyer>=2.1.0
+
+# ── Windows-specific notifications (optional) ────────────────────────────────
+# win10toast>=0.9  # Uncomment on Windows if plyer doesn't work

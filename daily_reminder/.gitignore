@@ -1,0 +1,15 @@
+# Google OAuth credentials and tokens
+config/credentials.json
+data/token.json
+
+# User data
+data/tasks.json
+data/user_settings.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.log
