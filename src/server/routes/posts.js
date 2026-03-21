@@ -1,7 +1,26 @@
 import { Router } from 'express'
 import db from '../db/database.js'
+import { validatePostUpdate } from '../utils/validators.js'
 
 const router = Router()
+
+const DEFAULT_BRIEF = {
+  platform: 'xiaohongshu',
+  targetAudience: '',
+  coreMessage: '',
+  contentForm: '知识卡片',
+  cardCount: 3,
+}
+
+const DEFAULT_CARD_STYLE = {
+  backgroundColor: '#1A1A2E',
+  accentColor: '#4A9EFF',
+  textColor: '#E8E8E8',
+  fontSize: 28,
+  padding: 60,
+  showSignature: false,
+  signature: '',
+}
 
 // GET /api/posts?topicId=X  — get or auto-create post for a topic
 router.get('/', (req, res) => {
@@ -18,20 +37,12 @@ router.get('/', (req, res) => {
     const result = db.prepare(
       'INSERT INTO posts (topic_id, platform, card_data) VALUES (?, ?, ?)'
     ).run(topicId, topic.platform, JSON.stringify({
-      brief: { platform: topic.platform, targetAudience: '', coreMessage: '', contentForm: '知识卡片', cardCount: 3 },
+      brief: { ...DEFAULT_BRIEF, platform: topic.platform },
       titles: [],
       selectedTitle: 0,
       cards: [],
       hashtags: [],
-      style: {
-        backgroundColor: '#1A1A2E',
-        accentColor: '#4A9EFF',
-        textColor: '#E8E8E8',
-        fontSize: 28,
-        padding: 60,
-        showSignature: false,
-        signature: '',
-      },
+      style: DEFAULT_CARD_STYLE,
     }))
 
     // Update topic status to writing
@@ -55,6 +66,9 @@ router.put('/:id', (req, res) => {
   const { title, body, cardData, status, aiProvider } = req.body
   const existing = db.prepare('SELECT * FROM posts WHERE id = ?').get(req.params.id)
   if (!existing) return res.status(404).json({ error: 'Post not found' })
+
+  const v = validatePostUpdate({ cardData, status })
+  if (!v.ok) return res.status(400).json({ error: v.error })
 
   db.prepare(
     `UPDATE posts SET

@@ -5,23 +5,8 @@ import StarterKit from '@tiptap/starter-kit'
 import CardPreview from '../components/CardPreview.jsx'
 import CardEditor from '../components/CardEditor.jsx'
 import AIPanel from '../components/AIPanel.jsx'
-
-const STEPS = [
-  { n: 1, label: 'Brief', icon: '📋' },
-  { n: 2, label: '生成', icon: '✦' },
-  { n: 3, label: '编辑', icon: '✍️' },
-  { n: 4, label: '排版', icon: '🎨' },
-  { n: 5, label: '导出', icon: '📤' },
-]
-
-const CONTENT_FORMS = ['知识卡片', '步骤教程', '经验分享', '工具推荐']
-
-const PLATFORMS = [
-  { value: 'xiaohongshu', label: '小红书' },
-  { value: 'wechat', label: '公众号' },
-  { value: 'jike', label: '即刻' },
-  { value: 'twitter', label: 'Twitter/X' },
-]
+import { STEPS, CONTENT_FORMS, PLATFORMS, DEFAULT_BRIEF, DEFAULT_CARD_STYLE } from '../constants/pipeline.js'
+import { fetchTopic, fetchPostByTopic, savePost as apiSavePost, requestDraftGeneration, exportPng as apiExportPng, exportAll as apiExportAll } from '../api/pipelineApi.js'
 
 export default function Pipeline() {
   const { topicId } = useParams()
@@ -33,15 +18,10 @@ export default function Pipeline() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const hasChanges = useRef(false)
 
   // Brief
-  const [brief, setBrief] = useState({
-    platform: 'xiaohongshu',
-    targetAudience: '',
-    coreMessage: '',
-    contentForm: '知识卡片',
-    cardCount: 3,
-  })
+  const [brief, setBrief] = useState(DEFAULT_BRIEF)
 
   // Generation
   const [generating, setGenerating] = useState(false)
@@ -51,15 +31,7 @@ export default function Pipeline() {
 
   // Cards (editable)
   const [cards, setCards] = useState([]) // [{ title, content }]
-  const [cardStyle, setCardStyle] = useState({
-    backgroundColor: '#1A1A2E',
-    accentColor: '#4A9EFF',
-    textColor: '#E8E8E8',
-    fontSize: 28,
-    padding: 60,
-    showSignature: false,
-    signature: '',
-  })
+  const [cardStyle, setCardStyle] = useState(DEFAULT_CARD_STYLE)
 
   // AI Panel
   const [aiPanel, setAiPanel] = useState(null) // { cardIndex, field }
@@ -72,15 +44,19 @@ export default function Pipeline() {
     loadData()
   }, [topicId])
 
+  // Wrappers that mark data as changed before updating state
+  function updateBrief(val) { hasChanges.current = true; setBrief(val) }
+  function updateCards(val) { hasChanges.current = true; setCards(val) }
+  function updateCardStyle(val) { hasChanges.current = true; setCardStyle(val) }
+  function updateSelectedTitle(val) { hasChanges.current = true; setSelectedTitle(val) }
+
   async function loadData() {
     setLoading(true)
     try {
-      const [topicRes, postRes] = await Promise.all([
-        fetch(`/api/topics/${topicId}`),
-        fetch(`/api/posts?topicId=${topicId}`),
+      const [topicData, postData] = await Promise.all([
+        fetchTopic(topicId),
+        fetchPostByTopic(topicId),
       ])
-      const topicData = await topicRes.json()
-      const postData = await postRes.json()
 
       setTopic(topicData)
       setPost(postData)
@@ -104,6 +80,7 @@ export default function Pipeline() {
   async function savePost(updates = {}) {
     if (!post) return
     setSaving(true)
+    hasChanges.current = false
     try {
       const currentCd = post.card_data ? JSON.parse(post.card_data) : {}
       const newCd = {
@@ -116,19 +93,15 @@ export default function Pipeline() {
         style: cardStyle,
         ...updates.cardData,
       }
-      const res = await fetch(`/api/posts/${post.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: draft?.titles?.[selectedTitle] || null,
-          cardData: newCd,
-          ...updates,
-        }),
+      const updated = await apiSavePost(post.id, {
+        title: draft?.titles?.[selectedTitle] || null,
+        cardData: newCd,
+        ...updates,
       })
-      const updated = await res.json()
       setPost(updated)
     } catch (err) {
       console.error(err)
+      hasChanges.current = true // restore flag so retry is possible
     } finally {
       setSaving(false)
     }
@@ -140,13 +113,7 @@ export default function Pipeline() {
     setError('')
 
     try {
-      const response = await fetch('/api/ai/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topicTitle: topic.title, brief }),
-      })
-
-      if (!response.ok) throw new Error('Generation failed')
+      const response = await requestDraftGeneration(topic.title, brief)
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
@@ -178,13 +145,20 @@ export default function Pipeline() {
       if (result) {
         setDraft(result)
         setSelectedTitle(0)
-        const initCards = result.cards || []
-        setCards(initCards)
+        setCards(result.cards || [])
+        hasChanges.current = true
       } else {
-        setError('AI 返回格式异常，请重试')
+        setError('AI 生成内容为空，请重试')
       }
     } catch (err) {
-      setError(err.message)
+      const msg = err.message || ''
+      if (msg.includes('未配置') || msg.includes('No AI provider')) {
+        setError('未配置 AI Provider，请先前往 Settings 添加 API Key')
+      } else if (msg.includes('API Key') || msg.includes('无效')) {
+        setError(msg)
+      } else {
+        setError(`生成失败：${msg}`)
+      }
     } finally {
       setGenerating(false)
     }
@@ -194,18 +168,8 @@ export default function Pipeline() {
     setExporting(true)
     setExportStatus('导出中...')
     try {
-      // Save first
       await savePost()
-      const response = await fetch('/api/export/png', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ postId: post.id, cardIndex }),
-      })
-      if (!response.ok) {
-        const err = await response.json()
-        throw new Error(err.error)
-      }
-      const blob = await response.blob()
+      const blob = await apiExportPng(post.id, cardIndex)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -225,16 +189,7 @@ export default function Pipeline() {
     setExportStatus('正在渲染所有卡片...')
     try {
       await savePost()
-      const response = await fetch('/api/export/all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ postId: post.id }),
-      })
-      if (!response.ok) {
-        const err = await response.json()
-        throw new Error(err.error)
-      }
-      const blob = await response.blob()
+      const blob = await apiExportAll(post.id)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -250,7 +205,7 @@ export default function Pipeline() {
   }
 
   function goStep(n) {
-    savePost()
+    if (hasChanges.current) savePost()
     setStep(n)
   }
 
@@ -345,7 +300,7 @@ export default function Pipeline() {
         )}
 
         {step === 1 && (
-          <StepBrief brief={brief} onChange={setBrief} />
+          <StepBrief brief={brief} onChange={updateBrief} />
         )}
 
         {step === 2 && (
@@ -356,36 +311,48 @@ export default function Pipeline() {
             streamText={streamText}
             draft={draft}
             selectedTitle={selectedTitle}
-            onSelectTitle={setSelectedTitle}
+            onSelectTitle={updateSelectedTitle}
             onGenerate={generateDraft}
           />
         )}
 
         {step === 3 && (
-          <StepEdit
-            cards={cards}
-            onChange={setCards}
-            platform={brief.platform}
-            draft={draft}
-            selectedTitle={selectedTitle}
-            onSelectTitle={setSelectedTitle}
-            aiPanel={aiPanel}
-            onOpenAIPanel={(idx, field) => setAiPanel({ cardIndex: idx, field })}
-            onCloseAIPanel={() => setAiPanel(null)}
-          />
+          cards.length === 0 ? (
+            <EmptyStep message="请先在 Step 2 生成草稿" onGoBack={() => setStep(2)} />
+          ) : (
+            <StepEdit
+              cards={cards}
+              onChange={updateCards}
+              platform={brief.platform}
+              draft={draft}
+              selectedTitle={selectedTitle}
+              onSelectTitle={updateSelectedTitle}
+              aiPanel={aiPanel}
+              onOpenAIPanel={(idx, field) => setAiPanel({ cardIndex: idx, field })}
+              onCloseAIPanel={() => setAiPanel(null)}
+            />
+          )
         )}
 
         {step === 4 && (
-          <StepPreview
-            cards={cards}
-            style={cardStyle}
-            platform={brief.platform}
-            onChange={setCards}
-            onStyleChange={setCardStyle}
-          />
+          cards.length === 0 ? (
+            <EmptyStep message="请先在 Step 2-3 生成并编辑内容" onGoBack={() => setStep(2)} />
+          ) : (
+            <StepPreview
+              cards={cards}
+              style={cardStyle}
+              platform={brief.platform}
+              onChange={updateCards}
+              onStyleChange={updateCardStyle}
+            />
+          )
         )}
 
-        {step === 5 && (
+        {step === 5 && cards.length === 0 && (
+          <EmptyStep message="当前还没有可导出的卡片，请先完成 Step 2-3" onGoBack={() => setStep(2)} />
+        )}
+
+        {step === 5 && cards.length > 0 && (
           <StepExport
             cards={cards}
             post={post}
@@ -428,6 +395,17 @@ export default function Pipeline() {
           下一步 →
         </button>
       </div>
+    </div>
+  )
+}
+
+/* ─── Empty state placeholder ─── */
+function EmptyStep({ message, onGoBack }) {
+  return (
+    <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)', border: '1px dashed var(--border)', borderRadius: 12 }}>
+      <div style={{ fontSize: 32, marginBottom: 12 }}>📝</div>
+      <div style={{ fontSize: 15, marginBottom: 16 }}>{message}</div>
+      <button className="btn btn-secondary" onClick={onGoBack}>← 返回生成</button>
     </div>
   )
 }

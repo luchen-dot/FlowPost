@@ -29,6 +29,7 @@ export default function TopicHub() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [filterStatus, setFilterStatus] = useState('all')
+  const [filterPlatform, setFilterPlatform] = useState('all')
   const [form, setForm] = useState({ title: '', platform: 'xiaohongshu', notes: '' })
   const [creating, setCreating] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
@@ -94,9 +95,9 @@ export default function TopicHub() {
     }
   }
 
-  const filtered = filterStatus === 'all'
-    ? topics
-    : topics.filter((t) => t.status === filterStatus)
+  const filtered = topics
+    .filter((t) => filterStatus === 'all' || t.status === filterStatus)
+    .filter((t) => filterPlatform === 'all' || t.platform === filterPlatform)
 
   const statusGroups = ['inbox', 'writing', 'done', 'archived']
 
@@ -117,8 +118,8 @@ export default function TopicHub() {
         </button>
       </div>
 
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+      {/* Filter tabs — status */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
         {[{ value: 'all', label: '全部' }, ...statusGroups.map((s) => ({ value: s, label: STATUS_LABELS[s].label }))].map(
           (tab) => (
             <button
@@ -144,6 +145,29 @@ export default function TopicHub() {
             </button>
           )
         )}
+      </div>
+
+      {/* Filter tabs — platform */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
+        {[{ value: 'all', label: '所有平台' }, ...PLATFORMS].map((p) => (
+          <button
+            key={p.value}
+            onClick={() => setFilterPlatform(p.value)}
+            style={{
+              padding: '4px 12px',
+              borderRadius: 6,
+              border: '1px solid',
+              borderColor: filterPlatform === p.value ? (PLATFORM_COLORS[p.value]?.color || 'var(--accent)') : 'var(--border)',
+              background: filterPlatform === p.value ? ((PLATFORM_COLORS[p.value]?.color || 'var(--accent)') + '22') : 'transparent',
+              color: filterPlatform === p.value ? (PLATFORM_COLORS[p.value]?.color || 'var(--accent)') : 'var(--text-muted)',
+              cursor: 'pointer',
+              fontSize: 12,
+              transition: 'all 0.15s',
+            }}
+          >
+            {p.label}
+          </button>
+        ))}
       </div>
 
       {/* Topic list */}
@@ -276,7 +300,7 @@ function TopicCard({ topic, onEnter, onStatusChange, onDelete, confirmingDelete,
             {pl.label}
           </span>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            {new Date(topic.created_at).toLocaleDateString('zh-CN')}
+            {new Date(topic.updated_at || topic.created_at).toLocaleDateString('zh-CN')}
           </span>
           {topic.notes && (
             <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>

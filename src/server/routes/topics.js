@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import db from '../db/database.js'
+import { validateTopicInput } from '../utils/validators.js'
 
 const router = Router()
 
@@ -41,6 +42,9 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'Title is required' })
   }
 
+  const v = validateTopicInput({ platform, notes })
+  if (!v.ok) return res.status(400).json({ error: v.error })
+
   const result = db.prepare(
     'INSERT INTO topics (title, source, source_ref, platform, notes) VALUES (?, ?, ?, ?, ?)'
   ).run(title.trim(), source, sourceRef || null, platform, notes || null)
@@ -54,6 +58,9 @@ router.put('/:id', (req, res) => {
   const { title, status, platform, notes } = req.body
   const existing = db.prepare('SELECT id FROM topics WHERE id = ?').get(req.params.id)
   if (!existing) return res.status(404).json({ error: 'Topic not found' })
+
+  const v = validateTopicInput({ title, status, platform, notes })
+  if (!v.ok) return res.status(400).json({ error: v.error })
 
   db.prepare(
     `UPDATE topics SET
