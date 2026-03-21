@@ -1,11 +1,12 @@
 import { Router } from 'express'
 import puppeteer from 'puppeteer'
-import { writeFileSync, mkdirSync } from 'fs'
+import { writeFileSync, mkdirSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
 import archiver from 'archiver'
 import db from '../db/database.js'
+import { validateExportInput } from '../utils/validators.js'
 
 const router = Router()
 const __filename = fileURLToPath(import.meta.url)
@@ -150,17 +151,23 @@ async function screenshotCard(browser, html, size) {
   writeFileSync(tmpFile, html, 'utf-8')
 
   const page = await browser.newPage()
-  await page.setViewport({ width: size.width, height: size.height, deviceScaleFactor: 1 })
-  await page.goto(`file://${tmpFile}`, { waitUntil: 'load', timeout: 15000 })
-  const screenshot = await page.screenshot({ type: 'png' })
-  await page.close()
-
-  return screenshot
+  try {
+    await page.setViewport({ width: size.width, height: size.height, deviceScaleFactor: 1 })
+    await page.goto(`file://${tmpFile}`, { waitUntil: 'load', timeout: 15000 })
+    const screenshot = await page.screenshot({ type: 'png' })
+    return screenshot
+  } finally {
+    await page.close()
+    try { unlinkSync(tmpFile) } catch {}
+  }
 }
 
 // POST /api/export/png  — export a single card
 router.post('/png', async (req, res) => {
   const { postId, cardIndex = 0 } = req.body
+
+  const v = validateExportInput({ postId, cardIndex })
+  if (!v.ok) return res.status(400).json({ error: v.error })
 
   try {
     const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(postId)
@@ -200,6 +207,9 @@ router.post('/png', async (req, res) => {
 // POST /api/export/all  — export all cards as ZIP
 router.post('/all', async (req, res) => {
   const { postId } = req.body
+
+  const v = validateExportInput({ postId })
+  if (!v.ok) return res.status(400).json({ error: v.error })
 
   try {
     const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(postId)

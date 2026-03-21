@@ -1,5 +1,7 @@
 import { Router } from 'express'
 import { generate, getActiveProviderInfo } from '../services/aiProvider.js'
+import { normalizeDraft } from '../services/normalizeDraft.js'
+import { validateGenerateInput } from '../utils/validators.js'
 
 const router = Router()
 
@@ -33,7 +35,9 @@ router.get('/provider', (req, res) => {
 // POST /api/ai/generate  — generate draft (SSE streaming)
 router.post('/generate', async (req, res) => {
   const { topicTitle, brief } = req.body
-  if (!topicTitle) return res.status(400).json({ error: 'topicTitle is required' })
+
+  const v = validateGenerateInput(req.body)
+  if (!v.ok) return res.status(400).json({ error: v.error })
 
   const platform = brief?.platform || 'xiaohongshu'
   const systemPrompt = PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS.xiaohongshu
@@ -87,27 +91,19 @@ router.post('/generate', async (req, res) => {
       }
     )
 
-    // Parse JSON from response
-    const jsonMatch = fullText.match(/```json\s*([\s\S]*?)```/)
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[1].trim())
-        sseWrite(res, { done: true, result: parsed })
-      } catch {
-        sseWrite(res, { done: true, raw: fullText })
-      }
-    } else {
-      // Try direct JSON parse
-      try {
-        const parsed = JSON.parse(fullText.trim())
-        sseWrite(res, { done: true, result: parsed })
-      } catch {
-        sseWrite(res, { done: true, raw: fullText })
-      }
-    }
+    const result = normalizeDraft(fullText, topicTitle, brief?.cardCount || 3)
+    sseWrite(res, { done: true, result })
   } catch (err) {
     console.error('Generate error:', err.message)
-    sseWrite(res, { error: err.message })
+    // Categorize error for frontend display
+    const msg = err.message || ''
+    if (msg.includes('No AI provider') || msg.includes('not configured')) {
+      sseWrite(res, { error: '未配置 AI Provider，请先前往 Settings 添加 API Key' })
+    } else if (msg.includes('401') || msg.toLowerCase().includes('unauthorized') || msg.includes('invalid api key')) {
+      sseWrite(res, { error: 'API Key 无效或已过期，请在 Settings 中检查' })
+    } else {
+      sseWrite(res, { error: `生成失败：${msg}` })
+    }
   }
 
   res.end()
