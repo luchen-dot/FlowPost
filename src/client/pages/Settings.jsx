@@ -52,11 +52,29 @@ export default function Settings() {
   const [testing, setTesting] = useState({})
   const [testResults, setTestResults] = useState({})
   const [routingSaved, setRoutingSaved] = useState(false)
+  // Server-provided model lists; falls back to local PROVIDERS constants if fetch fails
+  const [serverModels, setServerModels] = useState({})
 
   useEffect(() => {
     loadSettings()
     loadRouting()
+    loadServerProviders()
   }, [])
+
+  async function loadServerProviders() {
+    try {
+      const res = await fetch('/api/settings/providers')
+      if (res.ok) {
+        const data = await res.json()
+        // data is { Claude: { models: [...] }, OpenAI: { models: [...] }, ... }
+        const models = {}
+        Object.entries(data).forEach(([key, val]) => {
+          if (Array.isArray(val.models)) models[key] = val.models
+        })
+        setServerModels(models)
+      }
+    } catch {}
+  }
 
   async function loadSettings() {
     try {
@@ -260,7 +278,7 @@ export default function Settings() {
                       value={currentModel}
                       onChange={(e) => updateModel(p.key, e.target.value)}
                     >
-                      {p.models.map((m) => (
+                      {(serverModels[p.key] || p.models).map((m) => (
                         <option key={m} value={m}>{m}</option>
                       ))}
                     </select>
