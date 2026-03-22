@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS feed_items (
   summary TEXT,
   published_at DATETIME,
   saved_as_topic INTEGER DEFAULT 0,
+  relevance_score REAL,
+  trendradar_id INTEGER,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -132,6 +134,18 @@ CREATE TABLE IF NOT EXISTS kb_topic_suggestions (
   status TEXT DEFAULT 'pending',
   -- pending | adopted | dismissed
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- TrendRadar 集成配置表
+CREATE TABLE IF NOT EXISTS trendradar_config (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  db_path TEXT,
+  min_relevance REAL DEFAULT 0.6,
+  topic_keywords TEXT DEFAULT '["AI","人工智能","大模型","LLM","GPT","Claude","创作","内容","写作","自媒体","博主","运营"]',
+  auto_sync INTEGER DEFAULT 0,
+  sync_interval_hours INTEGER DEFAULT 6,
+  last_synced_at DATETIME,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Notion 同步配置表

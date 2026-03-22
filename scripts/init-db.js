@@ -12,6 +12,17 @@ const schema = readFileSync(schemaPath, 'utf-8')
 
 db.exec(schema)
 
+// Migrate existing feed_items table: add columns if missing
+const feedCols = db.pragma('table_info(feed_items)').map((c) => c.name)
+if (!feedCols.includes('relevance_score')) {
+  db.exec('ALTER TABLE feed_items ADD COLUMN relevance_score REAL')
+  console.log('  migrated: feed_items.relevance_score added')
+}
+if (!feedCols.includes('trendradar_id')) {
+  db.exec('ALTER TABLE feed_items ADD COLUMN trendradar_id INTEGER')
+  console.log('  migrated: feed_items.trendradar_id added')
+}
+
 console.log('✅ FlowPost database initialized successfully')
 console.log('📁 Location: data/flowpost.db')
 console.log('')
