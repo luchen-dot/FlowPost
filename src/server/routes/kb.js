@@ -2,8 +2,24 @@ import { Router } from 'express'
 import db from '../db/database.js'
 import { syncFromTrendRadar } from '../services/trendradarSync.js'
 import { generate } from '../services/aiProvider.js'
+import { fetchAllPlatforms } from '../services/newsnowFetcher.js'
+import { keywordFilter, aiScoreItems } from '../services/newsFilter.js'
 
 const router = Router()
+
+// ── Ensure newsnow_config table exists (migration for existing DBs) ────────────
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS newsnow_config (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    interest_description TEXT DEFAULT '',
+    platforms TEXT DEFAULT '["zhihu","weibo","bilibili","baidu","toutiao"]',
+    keywords TEXT DEFAULT '[]',
+    min_relevance REAL DEFAULT 0.6,
+    use_ai_filter INTEGER DEFAULT 1,
+    last_synced_at DATETIME,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`).run()
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -232,6 +248,134 @@ router.post('/suggestions/:id/adopt', (req, res) => {
   db.prepare("UPDATE kb_topic_suggestions SET status = 'adopted' WHERE id = ?").run(suggestion.id)
 
   res.json({ ok: true, topicId: topic.lastInsertRowid })
+})
+
+// ── NewsNow Direct Sync ────────────────────────────────────────────────────────
+
+function getNewsnowConfig() {
+  const row = db.prepare('SELECT * FROM newsnow_config WHERE id = 1').get()
+  if (!row) {
+    return {
+      interest_description: '',
+      platforms: ['zhihu', 'weibo', 'bilibili', 'baidu', 'toutiao'],
+      keywords: [],
+      min_relevance: 0.6,
+      use_ai_filter: 1,
+      last_synced_at: null,
+    }
+  }
+  return {
+    ...row,
+    platforms: row.platforms ? JSON.parse(row.platforms) : [],
+    keywords: row.keywords ? JSON.parse(row.keywords) : [],
+  }
+}
+
+// GET /api/kb/newsnow/config
+router.get('/newsnow/config', (req, res) => {
+  res.json(getNewsnowConfig())
+})
+
+// PUT /api/kb/newsnow/config
+router.put('/newsnow/config', (req, res) => {
+  const { interest_description, platforms, keywords, min_relevance, use_ai_filter } = req.body
+  db.prepare(`
+    INSERT INTO newsnow_config (id, interest_description, platforms, keywords, min_relevance, use_ai_filter, updated_at)
+    VALUES (1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET
+      interest_description = excluded.interest_description,
+      platforms = excluded.platforms,
+      keywords = excluded.keywords,
+      min_relevance = excluded.min_relevance,
+      use_ai_filter = excluded.use_ai_filter,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    interest_description ?? '',
+    JSON.stringify(Array.isArray(platforms) ? platforms : []),
+    JSON.stringify(Array.isArray(keywords) ? keywords : []),
+    min_relevance ?? 0.6,
+    use_ai_filter ? 1 : 0
+  )
+  res.json({ ok: true })
+})
+
+// POST /api/kb/newsnow/sync  — SSE streaming progress
+router.post('/newsnow/sync', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+
+  function send(data) {
+    res.write(`data: ${JSON.stringify(data)}\n\n`)
+  }
+
+  try {
+    const config = getNewsnowConfig()
+    const platforms = config.platforms?.length
+      ? config.platforms
+      : ['zhihu', 'weibo', 'bilibili', 'baidu', 'toutiao']
+
+    send({ step: 'fetch', message: `正在拉取 ${platforms.length} 个平台热榜…` })
+    const rawItems = await fetchAllPlatforms(platforms)
+
+    send({ step: 'filter', message: `已获取 ${rawItems.length} 条，关键词预筛选中…` })
+    const preFiltered = keywordFilter(rawItems, config.keywords || [])
+
+    let scored = preFiltered
+    if (config.use_ai_filter && config.interest_description?.trim()) {
+      send({ step: 'ai', message: `Claude 正在为 ${preFiltered.length} 条资讯打分…` })
+      scored = await aiScoreItems(preFiltered, config.interest_description)
+    } else {
+      scored = preFiltered.map((item) => ({ ...item, relevance_score: 0.7 }))
+    }
+
+    const minScore = config.min_relevance ?? 0.6
+    const qualified = scored.filter((item) => item.relevance_score >= minScore)
+
+    send({ step: 'save', message: `筛选出 ${qualified.length} 条，写入数据库…` })
+
+    const insertStmt = db.prepare(`
+      INSERT INTO feed_items (source, source_name, title, url, summary, published_at, relevance_score)
+      SELECT ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP, ?
+      WHERE NOT EXISTS (SELECT 1 FROM feed_items WHERE url = ?)
+    `)
+
+    let added = 0
+    const insertAll = db.transaction((items) => {
+      for (const item of items) {
+        const changes = insertStmt.run(
+          item.source,
+          item.source_name,
+          item.title,
+          item.url,
+          item.relevance_score,
+          item.url
+        ).changes
+        if (changes) added++
+      }
+    })
+    insertAll(qualified)
+
+    // Update last_synced_at
+    db.prepare(`
+      INSERT INTO newsnow_config (id, last_synced_at, updated_at)
+      VALUES (1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT(id) DO UPDATE SET last_synced_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    `).run()
+
+    send({
+      done: true,
+      total: rawItems.length,
+      filtered: preFiltered.length,
+      qualified: qualified.length,
+      added,
+    })
+    res.end()
+  } catch (err) {
+    console.error('[newsnow] sync error:', err)
+    send({ error: err.message })
+    res.end()
+  }
 })
 
 export default router

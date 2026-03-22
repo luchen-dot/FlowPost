@@ -148,6 +148,22 @@ CREATE TABLE IF NOT EXISTS trendradar_config (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- NewsNow 直连配置表
+CREATE TABLE IF NOT EXISTS newsnow_config (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  interest_description TEXT DEFAULT '',
+  -- 自然语言兴趣描述，用于 Claude 打分
+  platforms TEXT DEFAULT '["zhihu","weibo","bilibili","baidu","toutiao"]',
+  -- JSON 数组: 抓取的平台 ID 列表
+  keywords TEXT DEFAULT '[]',
+  -- JSON 数组: 关键词预过滤列表（空则不过滤）
+  min_relevance REAL DEFAULT 0.6,
+  use_ai_filter INTEGER DEFAULT 1,
+  -- 是否启用 Claude AI 打分
+  last_synced_at DATETIME,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Notion 同步配置表
 CREATE TABLE IF NOT EXISTS notion_config (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

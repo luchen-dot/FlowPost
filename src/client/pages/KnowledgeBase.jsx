@@ -57,7 +57,37 @@ function EmptyState({ icon, text }) {
   )
 }
 
-// ── Config panel ──────────────────────────────────────────────────────────────
+const MODAL_STYLE = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0,0,0,0.6)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 100,
+}
+
+const MODAL_BOX_STYLE = {
+  background: 'var(--bg-secondary)',
+  border: '1px solid var(--border)',
+  borderRadius: 12,
+  padding: 28,
+  width: 480,
+  maxWidth: '90vw',
+}
+
+const INPUT_STYLE = {
+  width: '100%',
+  padding: '8px 12px',
+  background: 'var(--bg)',
+  border: '1px solid var(--border)',
+  borderRadius: 8,
+  color: 'var(--text-primary)',
+  fontSize: 13,
+  boxSizing: 'border-box',
+}
+
+// ── TrendRadar Config panel ────────────────────────────────────────────────────
 
 function ConfigPanel({ config, onSave, onClose }) {
   const [dbPath, setDbPath] = useState(config?.db_path || '')
@@ -90,29 +120,8 @@ function ConfigPanel({ config, onSave, onClose }) {
   }
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.6)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 100,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border)',
-          borderRadius: 12,
-          padding: 28,
-          width: 480,
-          maxWidth: '90vw',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div style={MODAL_STYLE} onClick={onClose}>
+      <div style={MODAL_BOX_STYLE} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ margin: '0 0 20px', fontSize: 16 }}>TrendRadar 连接配置</h3>
 
         <label style={{ display: 'block', marginBottom: 16 }}>
@@ -123,16 +132,7 @@ function ConfigPanel({ config, onSave, onClose }) {
             value={dbPath}
             onChange={(e) => setDbPath(e.target.value)}
             placeholder="/path/to/trendradar/data/news.db"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text-primary)',
-              fontSize: 13,
-              boxSizing: 'border-box',
-            }}
+            style={INPUT_STYLE}
           />
         </label>
 
@@ -147,15 +147,7 @@ function ConfigPanel({ config, onSave, onClose }) {
             step="0.1"
             value={minScore}
             onChange={(e) => setMinScore(e.target.value)}
-            style={{
-              width: 100,
-              padding: '8px 12px',
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text-primary)',
-              fontSize: 13,
-            }}
+            style={{ ...INPUT_STYLE, width: 100 }}
           />
         </label>
 
@@ -167,48 +159,162 @@ function ConfigPanel({ config, onSave, onClose }) {
             value={keywords}
             onChange={(e) => setKeywords(e.target.value)}
             rows={3}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              background: 'var(--bg)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text-primary)',
-              fontSize: 13,
-              resize: 'vertical',
-              boxSizing: 'border-box',
-            }}
+            style={{ ...INPUT_STYLE, resize: 'vertical' }}
           />
         </label>
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '8px 16px',
-              background: 'transparent',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
+          <button onClick={onClose} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13 }}>
             取消
           </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{
-              padding: '8px 16px',
-              background: 'var(--accent)',
-              border: 'none',
-              borderRadius: 8,
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: 13,
-            }}
-          >
+          <button onClick={handleSave} disabled={saving} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontSize: 13 }}>
+            {saving ? '保存中…' : '保存'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── NewsNow Config panel ───────────────────────────────────────────────────────
+
+const ALL_PLATFORMS = [
+  { id: 'zhihu', label: '知乎热榜' },
+  { id: 'weibo', label: '微博热搜' },
+  { id: 'bilibili', label: 'B站热门' },
+  { id: 'baidu', label: '百度热搜' },
+  { id: 'toutiao', label: '今日头条' },
+  { id: 'douyin', label: '抖音热榜' },
+  { id: 'tieba', label: '贴吧热议' },
+  { id: 'thepaper', label: '澎湃新闻' },
+  { id: 'wallstreetcn', label: '华尔街见闻' },
+  { id: 'ifeng', label: '凤凰资讯' },
+  { id: 'cls', label: '财联社' },
+]
+
+function NewsnowConfigPanel({ config, onSave, onClose }) {
+  const [interest, setInterest] = useState(config?.interest_description || '')
+  const [platforms, setPlatforms] = useState(
+    Array.isArray(config?.platforms) ? config.platforms : ['zhihu', 'weibo', 'bilibili', 'baidu', 'toutiao']
+  )
+  const [keywords, setKeywords] = useState(
+    Array.isArray(config?.keywords) ? config.keywords.join(', ') : ''
+  )
+  const [minScore, setMinScore] = useState(config?.min_relevance ?? 0.6)
+  const [useAI, setUseAI] = useState(config?.use_ai_filter !== 0)
+  const [saving, setSaving] = useState(false)
+
+  function togglePlatform(id) {
+    setPlatforms((prev) =>
+      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
+    )
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await apiFetch('/newsnow/config', {
+        method: 'PUT',
+        body: JSON.stringify({
+          interest_description: interest.trim(),
+          platforms,
+          keywords: keywords.split(',').map((k) => k.trim()).filter(Boolean),
+          min_relevance: parseFloat(minScore),
+          use_ai_filter: useAI ? 1 : 0,
+        }),
+      })
+      onSave()
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={MODAL_STYLE} onClick={onClose}>
+      <div style={{ ...MODAL_BOX_STYLE, width: 520 }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>NewsNow 直连配置</h3>
+        <p style={{ margin: '0 0 20px', fontSize: 12, color: 'var(--text-muted)' }}>
+          直接从 NewsNow 聚合平台拉取热榜，无需安装 TrendRadar
+        </p>
+
+        <label style={{ display: 'block', marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+            我关注的主题（自然语言描述，Claude 用此给资讯打相关度分）
+          </div>
+          <textarea
+            value={interest}
+            onChange={(e) => setInterest(e.target.value)}
+            rows={3}
+            placeholder="例：AI 工具、内容创作、自媒体运营、产品设计"
+            style={{ ...INPUT_STYLE, resize: 'vertical' }}
+          />
+        </label>
+
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>抓取平台</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {ALL_PLATFORMS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => togglePlatform(p.id)}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 12,
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  cursor: 'pointer',
+                  background: platforms.includes(p.id) ? 'var(--accent)' : 'transparent',
+                  color: platforms.includes(p.id) ? '#fff' : 'var(--text-secondary)',
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label style={{ display: 'block', marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+            关键词预过滤（逗号分隔，留空则不过滤）
+          </div>
+          <input
+            value={keywords}
+            onChange={(e) => setKeywords(e.target.value)}
+            placeholder="AI, 人工智能, 创作, 自媒体"
+            style={INPUT_STYLE}
+          />
+        </label>
+
+        <div style={{ display: 'flex', gap: 16, marginBottom: 24, alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={useAI}
+              onChange={(e) => setUseAI(e.target.checked)}
+            />
+            启用 Claude AI 打分
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>最低分数</span>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.1"
+              value={minScore}
+              onChange={(e) => setMinScore(e.target.value)}
+              style={{ ...INPUT_STYLE, width: 70 }}
+            />
+          </label>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13 }}>
+            取消
+          </button>
+          <button onClick={handleSave} disabled={saving} style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontSize: 13 }}>
             {saving ? '保存中…' : '保存'}
           </button>
         </div>
@@ -479,13 +585,19 @@ export default function KnowledgeBase() {
   } = useAppStore()
 
   const [showConfig, setShowConfig] = useState(false)
+  const [showNewsnowConfig, setShowNewsnowConfig] = useState(false)
+  const [newsnowConfig, setNewsnowConfig] = useState(null)
   const [syncResult, setSyncResult] = useState(null)
+  const [syncMessage, setSyncMessage] = useState('')
   const [generating, setGenerating] = useState(false)
   const [feedPage, setFeedPage] = useState(1)
+  // 'trendradar' | 'newsnow'
+  const [activeSource, setActiveSource] = useState('newsnow')
 
   // Load all data on mount
   useEffect(() => {
     loadConfig()
+    loadNewsnowConfig()
     loadFeeds(1)
     loadDocs()
     loadSuggestions()
@@ -495,6 +607,13 @@ export default function KnowledgeBase() {
     try {
       const cfg = await apiFetch('/config')
       setKbConfig(cfg)
+    } catch {}
+  }
+
+  async function loadNewsnowConfig() {
+    try {
+      const cfg = await apiFetch('/newsnow/config')
+      setNewsnowConfig(cfg)
     } catch {}
   }
 
@@ -523,10 +642,47 @@ export default function KnowledgeBase() {
   async function handleSync() {
     setKbSyncing(true)
     setSyncResult(null)
+    setSyncMessage('')
     try {
       const result = await apiFetch('/sync', { method: 'POST' })
       setSyncResult(result)
       await loadFeeds(1)
+    } catch (err) {
+      setSyncResult({ error: err.message })
+    } finally {
+      setKbSyncing(false)
+    }
+  }
+
+  async function handleNewsnowSync() {
+    setKbSyncing(true)
+    setSyncResult(null)
+    setSyncMessage('连接 NewsNow…')
+    try {
+      const res = await fetch('/api/kb/newsnow/sync', { method: 'POST' })
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const text = decoder.decode(value)
+        const lines = text.split('\n').filter((l) => l.startsWith('data: '))
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.error) {
+              setSyncResult({ error: data.error })
+            } else if (data.done) {
+              setSyncResult(data)
+              setSyncMessage('')
+              await loadFeeds(1)
+              await loadNewsnowConfig()
+            } else if (data.message) {
+              setSyncMessage(data.message)
+            }
+          } catch {}
+        }
+      }
     } catch (err) {
       setSyncResult({ error: err.message })
     } finally {
@@ -560,72 +716,106 @@ export default function KnowledgeBase() {
   }
 
   const hasDbPath = kbConfig?.db_path
+  const lastSynced = activeSource === 'newsnow'
+    ? newsnowConfig?.last_synced_at
+    : kbConfig?.last_synced_at
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* ── Top bar ── */}
       <div
         style={{
-          padding: '16px 24px',
+          padding: '12px 24px',
           borderBottom: '1px solid var(--border)',
           display: 'flex',
           alignItems: 'center',
-          gap: 12,
+          gap: 10,
           flexShrink: 0,
+          flexWrap: 'wrap',
         }}
       >
-        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, flex: 1 }}>知识库</h1>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>知识库</h1>
 
-        {kbConfig?.last_synced_at && (
+        {/* Source switcher */}
+        <div style={{ display: 'flex', gap: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
+          {[
+            { key: 'newsnow', label: '直连热榜' },
+            { key: 'trendradar', label: 'TrendRadar' },
+          ].map((src) => (
+            <button
+              key={src.key}
+              onClick={() => { setActiveSource(src.key); setSyncResult(null); setSyncMessage('') }}
+              style={{
+                padding: '4px 12px',
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 6,
+                border: 'none',
+                cursor: 'pointer',
+                background: activeSource === src.key ? 'var(--accent)' : 'transparent',
+                color: activeSource === src.key ? '#fff' : 'var(--text-secondary)',
+              }}
+            >
+              {src.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1 }} />
+
+        {lastSynced && (
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            上次同步：{new Date(kbConfig.last_synced_at).toLocaleString('zh-CN')}
+            上次同步：{new Date(lastSynced).toLocaleString('zh-CN')}
           </span>
+        )}
+
+        {syncMessage && !syncResult && (
+          <span style={{ fontSize: 12, color: 'var(--accent)' }}>{syncMessage}</span>
         )}
 
         {syncResult && (
-          <span
-            style={{
-              fontSize: 12,
-              color: syncResult.error ? '#f87171' : '#4ade80',
-            }}
-          >
+          <span style={{ fontSize: 12, color: syncResult.error ? '#f87171' : '#4ade80' }}>
             {syncResult.error
               ? `错误: ${syncResult.error}`
-              : `+${syncResult.added} 条（过滤 ${syncResult.filtered}/${syncResult.total}）`}
+              : activeSource === 'newsnow'
+                ? `+${syncResult.added} 条（抓取 ${syncResult.total}，筛选 ${syncResult.qualified}）`
+                : `+${syncResult.added} 条（过滤 ${syncResult.filtered}/${syncResult.total}）`}
           </span>
         )}
 
-        <button
-          onClick={() => setShowConfig(true)}
-          style={{
-            padding: '6px 12px',
-            background: 'transparent',
-            border: '1px solid var(--border)',
-            borderRadius: 8,
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontSize: 12,
-          }}
-        >
-          {hasDbPath ? '⚙ 配置' : '⚙ 连接 TrendRadar'}
-        </button>
-
-        <button
-          onClick={handleSync}
-          disabled={kbSyncing || !hasDbPath}
-          style={{
-            padding: '6px 14px',
-            background: hasDbPath ? 'var(--accent)' : 'var(--border)',
-            border: 'none',
-            borderRadius: 8,
-            color: hasDbPath ? '#fff' : 'var(--text-muted)',
-            cursor: hasDbPath ? 'pointer' : 'not-allowed',
-            fontSize: 12,
-            fontWeight: 600,
-          }}
-        >
-          {kbSyncing ? '同步中…' : '▶ 立即同步'}
-        </button>
+        {activeSource === 'newsnow' ? (
+          <>
+            <button
+              onClick={() => setShowNewsnowConfig(true)}
+              style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12 }}
+            >
+              ⚙ 配置
+            </button>
+            <button
+              onClick={handleNewsnowSync}
+              disabled={kbSyncing}
+              style={{ padding: '6px 14px', background: 'var(--accent)', border: 'none', borderRadius: 8, color: '#fff', cursor: kbSyncing ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 600 }}
+            >
+              {kbSyncing ? '同步中…' : '▶ 立即同步'}
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => setShowConfig(true)}
+              style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12 }}
+            >
+              {hasDbPath ? '⚙ 配置' : '⚙ 连接 TrendRadar'}
+            </button>
+            <button
+              onClick={handleSync}
+              disabled={kbSyncing || !hasDbPath}
+              style={{ padding: '6px 14px', background: hasDbPath ? 'var(--accent)' : 'var(--border)', border: 'none', borderRadius: 8, color: hasDbPath ? '#fff' : 'var(--text-muted)', cursor: hasDbPath && !kbSyncing ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 600 }}
+            >
+              {kbSyncing ? '同步中…' : '▶ 立即同步'}
+            </button>
+          </>
+        )}
       </div>
 
       {/* ── 3-column body ── */}
@@ -658,10 +848,12 @@ export default function KnowledgeBase() {
             </span>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
-            {!hasDbPath ? (
-              <EmptyState icon="🔌" text="请先点击右上角「连接 TrendRadar」配置数据库路径" />
-            ) : kbFeeds.length === 0 ? (
-              <EmptyState icon="📭" text="暂无资讯，点击「立即同步」从 TrendRadar 拉取" />
+            {kbFeeds.length === 0 ? (
+              activeSource === 'newsnow'
+                ? <EmptyState icon="📡" text="点击右上角「立即同步」从热榜平台直接拉取资讯" />
+                : !hasDbPath
+                  ? <EmptyState icon="🔌" text="请先点击右上角「连接 TrendRadar」配置数据库路径" />
+                  : <EmptyState icon="📭" text="暂无资讯，点击「立即同步」从 TrendRadar 拉取" />
             ) : (
               <>
                 {kbFeeds.map((item) => (
@@ -806,7 +998,7 @@ export default function KnowledgeBase() {
         </div>
       </div>
 
-      {/* Config modal */}
+      {/* TrendRadar config modal */}
       {showConfig && (
         <ConfigPanel
           config={kbConfig}
@@ -815,6 +1007,18 @@ export default function KnowledgeBase() {
             loadConfig()
           }}
           onClose={() => setShowConfig(false)}
+        />
+      )}
+
+      {/* NewsNow config modal */}
+      {showNewsnowConfig && (
+        <NewsnowConfigPanel
+          config={newsnowConfig}
+          onSave={() => {
+            setShowNewsnowConfig(false)
+            loadNewsnowConfig()
+          }}
+          onClose={() => setShowNewsnowConfig(false)}
         />
       )}
     </div>
