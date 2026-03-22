@@ -7,6 +7,7 @@ import postsRouter from './routes/posts.js'
 import aiRouter from './routes/ai.js'
 import exportRouter from './routes/export.js'
 import settingsRouter from './routes/settings.js'
+import kbRouter from './routes/kb.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -23,6 +24,7 @@ app.use('/api/posts', postsRouter)
 app.use('/api/ai', aiRouter)
 app.use('/api/export', exportRouter)
 app.use('/api/settings', settingsRouter)
+app.use('/api/kb', kbRouter)
 
 // Health check
 app.get('/api/health', (req, res) => {

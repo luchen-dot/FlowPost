@@ -25,6 +25,23 @@ const useAppStore = create((set) => ({
   setAiSettings: (settings) => set({ aiSettings: settings }),
   activeProvider: null,
   setActiveProvider: (p) => set({ activeProvider: p }),
+
+  // Knowledge base
+  kbFeeds: [],
+  kbFeedsTotal: 0,
+  setKbFeeds: (feeds, total) => set({ kbFeeds: feeds, kbFeedsTotal: total }),
+
+  kbDocs: [],
+  setKbDocs: (docs) => set({ kbDocs: docs }),
+
+  kbSuggestions: [],
+  setKbSuggestions: (s) => set({ kbSuggestions: s }),
+
+  kbConfig: null,
+  setKbConfig: (cfg) => set({ kbConfig: cfg }),
+
+  kbSyncing: false,
+  setKbSyncing: (v) => set({ kbSyncing: v }),
 }))
 
 export default useAppStore
