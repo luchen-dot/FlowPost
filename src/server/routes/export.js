@@ -1,6 +1,8 @@
 import { Router } from 'express'
-import puppeteer from 'puppeteer'
-import { writeFileSync, mkdirSync, unlinkSync } from 'fs'
+import satori from 'satori'
+import { Resvg } from '@resvg/resvg-js'
+import sharp from 'sharp'
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { dirname } from 'path'
@@ -11,7 +13,11 @@ import { validateExportInput } from '../utils/validators.js'
 const router = Router()
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-const TEMP_DIR = join(__dirname, '../../../temp')
+const FONTS_DIR = join(__dirname, '../../../fonts')
+const FONT_PATH = join(FONTS_DIR, 'NotoSansSC-Regular.woff2')
+// jsDelivr CDN — Chinese Simplified subset (~2MB, downloads once)
+const FONT_URL =
+  'https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5.0.12/files/noto-sans-sc-chinese-simplified-400-normal.woff2'
 
 const PLATFORM_SIZES = {
   xiaohongshu: { width: 1080, height: 1440 },
@@ -20,151 +26,167 @@ const PLATFORM_SIZES = {
   twitter: { width: 1200, height: 675 },
 }
 
-function escapeHtml(str) {
-  return String(str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/\n/g, '<br>')
+// ── Font loading (lazy, cached after first download) ──────────────────────────
+
+let fontCache = null
+
+async function loadFont() {
+  if (fontCache) return fontCache
+  if (existsSync(FONT_PATH)) {
+    fontCache = readFileSync(FONT_PATH)
+    return fontCache
+  }
+  console.log('正在下载中文字体（首次运行，约 2MB）…')
+  mkdirSync(FONTS_DIR, { recursive: true })
+  const res = await fetch(FONT_URL)
+  if (!res.ok) throw new Error(`字体下载失败: HTTP ${res.status}`)
+  const buf = Buffer.from(await res.arrayBuffer())
+  writeFileSync(FONT_PATH, buf)
+  fontCache = buf
+  console.log('字体下载完成，已缓存到 fonts/ 目录')
+  return fontCache
 }
 
-function generateCardHTML(cardInfo, style, size) {
-  const bg = style.backgroundColor || '#1A1A2E'
-  const accent = style.accentColor || '#4A9EFF'
-  const textColor = style.textColor || '#E8E8E8'
-  const fontSize = style.fontSize || 28
-  const padding = style.padding || 60
+// ── Card layout node (Satori JSX-compatible object) ──────────────────────────
 
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  width: ${size.width}px;
-  height: ${size.height}px;
-  overflow: hidden;
-  background: ${bg};
-}
-.card {
-  width: ${size.width}px;
-  height: ${size.height}px;
-  background: ${bg};
-  color: ${textColor};
-  font-family: "WenQuanYi Micro Hei", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  padding: ${padding}px;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid ${accent}33;
-}
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 32px;
-  font-size: 20px;
-  color: ${accent};
-  opacity: 0.6;
-  font-weight: 500;
-}
-.card-title {
-  font-size: ${fontSize + 8}px;
-  font-weight: 700;
-  color: ${accent};
-  margin-bottom: 28px;
-  line-height: 1.5;
-  letter-spacing: 0.02em;
-}
-.card-body {
-  font-size: ${fontSize}px;
-  line-height: 2;
-  flex: 1;
-  color: ${textColor};
-}
-.card-body p { margin-bottom: 16px; }
-.card-footer {
-  margin-top: 32px;
-  font-size: 18px;
-  color: ${textColor};
-  opacity: 0.4;
-  text-align: right;
-}
-.accent-bar {
-  width: 40px;
-  height: 4px;
-  background: ${accent};
-  border-radius: 2px;
-  margin-bottom: 28px;
-}
-</style>
-</head>
-<body>
-<div class="card">
-  <div class="card-header">
-    <span>${escapeHtml(cardInfo.platform)}</span>
-    <span>${cardInfo.cardIndex + 1} / ${cardInfo.totalCards}</span>
-  </div>
-  <div class="card-title">${escapeHtml(cardInfo.title)}</div>
-  <div class="accent-bar"></div>
-  <div class="card-body">${escapeHtml(cardInfo.content)}</div>
-  ${style.showSignature && style.signature
-    ? `<div class="card-footer">@${escapeHtml(style.signature)}</div>`
-    : ''}
-</div>
-</body>
-</html>`
-}
+function buildCardNode(cardInfo, style, size) {
+  const bg      = style.backgroundColor || '#1A1A2E'
+  const accent  = style.accentColor     || '#4A9EFF'
+  const text    = style.textColor       || '#E8E8E8'
+  const fs      = style.fontSize        || 28
+  const pad     = style.padding         || 60
 
-async function launchBrowser() {
-  const launchOpts = {
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
-    headless: true,
+  const children = [
+    // Header
+    {
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 32,
+          fontSize: 20,
+          color: accent,
+          opacity: 0.6,
+          fontWeight: 500,
+        },
+        children: [
+          { type: 'span', props: { children: String(cardInfo.platform) } },
+          { type: 'span', props: { children: `${cardInfo.cardIndex + 1} / ${cardInfo.totalCards}` } },
+        ],
+      },
+    },
+    // Title
+    {
+      type: 'div',
+      props: {
+        style: {
+          fontSize: fs + 8,
+          fontWeight: 700,
+          color: accent,
+          marginBottom: 28,
+          lineHeight: 1.5,
+        },
+        children: String(cardInfo.title || ''),
+      },
+    },
+    // Accent bar
+    {
+      type: 'div',
+      props: {
+        style: {
+          width: 40,
+          height: 4,
+          background: accent,
+          borderRadius: 2,
+          marginBottom: 28,
+        },
+      },
+    },
+    // Body
+    {
+      type: 'div',
+      props: {
+        style: {
+          display: 'flex',
+          flexDirection: 'column',
+          fontSize: fs,
+          lineHeight: 2,
+          flex: 1,
+          color: text,
+        },
+        children: String(cardInfo.content || ''),
+      },
+    },
+  ]
+
+  if (style.showSignature && style.signature) {
+    children.push({
+      type: 'div',
+      props: {
+        style: {
+          marginTop: 32,
+          fontSize: 18,
+          color: text,
+          opacity: 0.4,
+        },
+        children: `@${style.signature}`,
+      },
+    })
   }
 
-  // Allow overriding Chrome path via env variable
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    launchOpts.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH
-  }
-
-  try {
-    return await puppeteer.launch(launchOpts)
-  } catch (err) {
-    if (err.message.includes('Could not find Chrome') || err.message.includes('Failed to find Chrome')) {
-      throw new Error(
-        '未找到 Chrome/Chromium。请安装 Chromium：\n  apt install chromium\n或设置环境变量：PUPPETEER_EXECUTABLE_PATH=/path/to/chrome'
-      )
-    }
-    throw err
-  }
-}
-
-async function screenshotCard(browser, html, size) {
-  mkdirSync(TEMP_DIR, { recursive: true })
-  const tmpFile = join(TEMP_DIR, `card_${Date.now()}_${Math.random().toString(36).slice(2)}.html`)
-  writeFileSync(tmpFile, html, 'utf-8')
-
-  const page = await browser.newPage()
-  try {
-    await page.setViewport({ width: size.width, height: size.height, deviceScaleFactor: 1 })
-    await page.goto(`file://${tmpFile}`, { waitUntil: 'load', timeout: 15000 })
-    const screenshot = await page.screenshot({ type: 'png' })
-    return screenshot
-  } finally {
-    await page.close()
-    try { unlinkSync(tmpFile) } catch {}
+  return {
+    type: 'div',
+    props: {
+      style: {
+        width: size.width,
+        height: size.height,
+        background: bg,
+        color: text,
+        padding: pad,
+        display: 'flex',
+        flexDirection: 'column',
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: `${accent}33`,
+      },
+      children,
+    },
   }
 }
 
-// POST /api/export/png  — export a single card
-router.post('/png', async (req, res) => {
-  const { postId, cardIndex = 0 } = req.body
+// ── Render to image buffer ────────────────────────────────────────────────────
+
+async function renderCard(node, size, format = 'png') {
+  const font = await loadFont()
+
+  const svg = await satori(node, {
+    width: size.width,
+    height: size.height,
+    fonts: [{ name: 'NotoSansSC', data: font, weight: 400, style: 'normal' }],
+  })
+
+  const resvg = new Resvg(svg, { fitTo: { mode: 'width', value: size.width } })
+  const pngBuf = resvg.render().asPng()
+
+  if (format === 'jpg' || format === 'jpeg') {
+    return sharp(pngBuf).jpeg({ quality: 90 }).toBuffer()
+  }
+  return pngBuf
+}
+
+function mimeAndExt(format) {
+  const isJpg = format === 'jpg' || format === 'jpeg'
+  return { mime: isJpg ? 'image/jpeg' : 'image/png', ext: isJpg ? 'jpg' : 'png' }
+}
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+
+// POST /api/export/image  — single card, format: 'png' | 'jpg'
+router.post('/image', async (req, res) => {
+  const { postId, cardIndex = 0, format = 'png' } = req.body
+  const fmt = ['png', 'jpg', 'jpeg'].includes(format) ? format : 'png'
 
   const v = validateExportInput({ postId, cardIndex })
   if (!v.ok) return res.status(400).json({ error: v.error })
@@ -174,39 +196,66 @@ router.post('/png', async (req, res) => {
     if (!post) return res.status(404).json({ error: 'Post not found' })
 
     const cardData = JSON.parse(post.card_data || '{}')
-    const cards = cardData.cards || []
-    const style = cardData.style || {}
-    const platform = post.platform || 'xiaohongshu'
-    const size = PLATFORM_SIZES[platform] || PLATFORM_SIZES.xiaohongshu
+    const cards    = cardData.cards  || []
+    const style    = cardData.style  || {}
+    const platform = post.platform   || 'xiaohongshu'
+    const size     = PLATFORM_SIZES[platform] || PLATFORM_SIZES.xiaohongshu
 
-    if (!cards.length) return res.status(400).json({ error: 'No cards to export' })
+    if (!cards.length)          return res.status(400).json({ error: 'No cards to export' })
     if (cardIndex >= cards.length) return res.status(400).json({ error: 'Card index out of range' })
 
-    const card = cards[cardIndex]
-    const html = generateCardHTML(
-      { ...card, platform, cardIndex, totalCards: cards.length },
-      style,
-      size
-    )
+    const node   = buildCardNode({ ...cards[cardIndex], platform, cardIndex, totalCards: cards.length }, style, size)
+    const imgBuf = await renderCard(node, size, fmt)
+    const { mime, ext } = mimeAndExt(fmt)
 
-    const browser = await launchBrowser()
-    const screenshot = await screenshotCard(browser, html, size)
-    await browser.close()
+    db.prepare("UPDATE posts SET status = 'exported', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(postId)
+
+    res.setHeader('Content-Type', mime)
+    res.setHeader('Content-Disposition', `attachment; filename="card_${cardIndex + 1}.${ext}"`)
+    res.send(imgBuf)
+  } catch (err) {
+    console.error('Export image error:', err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/export/png  — kept for backwards compatibility
+router.post('/png', async (req, res) => {
+  const { postId, cardIndex = 0 } = req.body
+  const v = validateExportInput({ postId, cardIndex })
+  if (!v.ok) return res.status(400).json({ error: v.error })
+
+  try {
+    const post = db.prepare('SELECT * FROM posts WHERE id = ?').get(postId)
+    if (!post) return res.status(404).json({ error: 'Post not found' })
+
+    const cardData = JSON.parse(post.card_data || '{}')
+    const cards    = cardData.cards  || []
+    const style    = cardData.style  || {}
+    const platform = post.platform   || 'xiaohongshu'
+    const size     = PLATFORM_SIZES[platform] || PLATFORM_SIZES.xiaohongshu
+
+    if (!cards.length)             return res.status(400).json({ error: 'No cards to export' })
+    if (cardIndex >= cards.length) return res.status(400).json({ error: 'Card index out of range' })
+
+    const node   = buildCardNode({ ...cards[cardIndex], platform, cardIndex, totalCards: cards.length }, style, size)
+    const imgBuf = await renderCard(node, size, 'png')
 
     db.prepare("UPDATE posts SET status = 'exported', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(postId)
 
     res.setHeader('Content-Type', 'image/png')
     res.setHeader('Content-Disposition', `attachment; filename="card_${cardIndex + 1}.png"`)
-    res.send(Buffer.from(screenshot))
+    res.send(imgBuf)
   } catch (err) {
     console.error('Export PNG error:', err)
     res.status(500).json({ error: err.message })
   }
 })
 
-// POST /api/export/all  — export all cards as ZIP
+// POST /api/export/all  — all cards as ZIP, format: 'png' | 'jpg'
 router.post('/all', async (req, res) => {
-  const { postId } = req.body
+  const { postId, format = 'png' } = req.body
+  const fmt = ['png', 'jpg', 'jpeg'].includes(format) ? format : 'png'
 
   const v = validateExportInput({ postId })
   if (!v.ok) return res.status(400).json({ error: v.error })
@@ -216,27 +265,19 @@ router.post('/all', async (req, res) => {
     if (!post) return res.status(404).json({ error: 'Post not found' })
 
     const cardData = JSON.parse(post.card_data || '{}')
-    const cards = cardData.cards || []
-    const style = cardData.style || {}
-    const platform = post.platform || 'xiaohongshu'
-    const size = PLATFORM_SIZES[platform] || PLATFORM_SIZES.xiaohongshu
+    const cards    = cardData.cards  || []
+    const style    = cardData.style  || {}
+    const platform = post.platform   || 'xiaohongshu'
+    const size     = PLATFORM_SIZES[platform] || PLATFORM_SIZES.xiaohongshu
 
     if (!cards.length) return res.status(400).json({ error: 'No cards to export' })
 
-    const browser = await launchBrowser()
-    const screenshots = []
-
+    const { ext } = mimeAndExt(fmt)
+    const buffers = []
     for (let i = 0; i < cards.length; i++) {
-      const html = generateCardHTML(
-        { ...cards[i], platform, cardIndex: i, totalCards: cards.length },
-        style,
-        size
-      )
-      const shot = await screenshotCard(browser, html, size)
-      screenshots.push(shot)
+      const node = buildCardNode({ ...cards[i], platform, cardIndex: i, totalCards: cards.length }, style, size)
+      buffers.push(await renderCard(node, size, fmt))
     }
-
-    await browser.close()
 
     db.prepare("UPDATE posts SET status = 'exported', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(postId)
 
@@ -245,17 +286,11 @@ router.post('/all', async (req, res) => {
 
     const archive = archiver('zip', { zlib: { level: 6 } })
     archive.pipe(res)
-
-    screenshots.forEach((buf, i) => {
-      archive.append(Buffer.from(buf), { name: `card_${i + 1}.png` })
-    })
-
+    buffers.forEach((buf, i) => archive.append(buf, { name: `card_${i + 1}.${ext}` }))
     await archive.finalize()
   } catch (err) {
     console.error('Export all error:', err)
-    if (!res.headersSent) {
-      res.status(500).json({ error: err.message })
-    }
+    if (!res.headersSent) res.status(500).json({ error: err.message })
   }
 })
 
